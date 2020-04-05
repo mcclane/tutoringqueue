@@ -4,7 +4,7 @@ const app = express()
 const WebSocket = require('ws')
 const server = http.createServer(app)
 const wss = new WebSocket.Server({ server })
-port = 3000
+port = 80
 
 
 app.use(express.static('public'))

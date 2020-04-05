@@ -1,4 +1,4 @@
-ws = new WebSocket("ws://localhost:3000")
+ws = new WebSocket(`ws://${window.location.host}`)
 ws.onopen = function (event) {
     document.getElementById("enqueue_button").onclick = function () {
         ws.send(`{"type": "tutor", "action": "enqueue", "name": "${document.getElementById("name").value}"}`)
