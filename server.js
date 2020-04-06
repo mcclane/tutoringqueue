@@ -4,45 +4,33 @@ const app = express()
 const WebSocket = require('ws')
 const server = http.createServer(app)
 const wss = new WebSocket.Server({ server })
-port = process.env.PORT
+const { v4: uuidv4 } = require('uuid');
 
+
+port = process.env.PORT
 
 app.use(express.static('public'))
 
-student_queue = [];
-tutor_queue = [];
+student_queue = []
+recent_list = []
+recent_capacity = 10
 
 class Student {
     constructor(client, name, _class, zoom_link) {
+        this.id = uuidv4()
         this.client = client
         this.name = name
         this._class = _class
         this.zoom_link = zoom_link
     }
-}
-
-class Tutor {
-    constructor(client, name) {
-        this.client = client
-        this.name = name
-    }
-}
-
-function removeClient(client) {
-    console.log("Disconnecting client");
-    for (i = 0; i < student_queue.length; i++) {
-        if (student_queue[i].client == client) {
-            student_queue.splice(i, 1);
-            return;
+    toJSON() {
+        return {
+            id: this.id,
+            name: this.name,
+            class: this._class,
+            zoom_link: this.zoom_link
         }
     }
-    for (i = 0; i < tutor_queue.length; i++) {
-        if (tutor_queue[i].client == client) {
-            tutor_queue.splice(i, 1);
-            return;
-        }
-    }
-
 }
 
 function noop() { }
@@ -52,31 +40,35 @@ function heartbeat() {
 }
 
 wss.on('connection', (client) => {
-    console.log("A ws connected!")
+    console.log("someone connected")
+    send_state()
 
     client.isAlive = true;
     client.on('pong', heartbeat);
 
     client.on('message', (msg) => {
-        // try {
-        const parsed = JSON.parse(msg);
-        if (parsed.type == "student") {
+        try {
+            const parsed = JSON.parse(msg);
             if (parsed.action == "enqueue") {
                 student_queue.push(new Student(client, parsed.name, parsed.class, parsed.zoom_link))
+                send_state()
             }
-        }
-        else if (parsed.type == "tutor") {
-            if (parsed.action == "enqueue") {
-                tutor_queue.push(new Tutor(client, parsed.name))
+            else if (parsed.action == "mark_helped") {
+                for (i = 0; i < student_queue.length; i++) {
+                    if (student_queue[i].id == parsed.id) {
+                        recent_list.push(student_queue[i])
+                        if (recent_list.length > recent_capacity) {
+                            recent_list.splice(0, recent_list.length - recent_capacity)
+                        }
+                        student_queue.splice(i, 1)
+                        send_state()
+                        return
+                    }
+                }
             }
+        } catch (e) {
+            console.log(e)
         }
-        console.log(`Client ${parsed.name} sent a message: ${msg}`);
-        // } catch (e) {
-        //     console.log("error saving client");
-        // }
-    })
-    client.on('close', () => {
-        removeClient(client);
     })
 })
 
@@ -90,25 +82,18 @@ const pingInterval = setInterval(function ping() {
         ws.isAlive = false;
         ws.ping(noop);
     });
-}, 1000);
+}, 5000);
 
-function match() {
-    while (student_queue.length > 0 && tutor_queue.length > 0) {
-        s = student_queue.shift()
-        t = tutor_queue.shift()
-        t.client.send(`Meet with your student, ${s.name}, here: <a target="_blank" href=${s.zoom_link}>${s.zoom_link}</a>. Resubmit this form when you are finished helping the student to get the next student from the queue.`);
-        s.client.send(`Your tutor, ${t.name}, will join your zoom meeting shortly.<br>After this tutor is done helping you, resubmit this form to rejoin the queue.`);
-
-    }
-    tutor_queue.forEach(t => {
-        t.client.send("Waiting for students...");
+function send_state() {
+    to_send = JSON.stringify({ queue: student_queue, recent: recent_list })
+    wss.clients.forEach(function each(client) {
+        if (client.readyState == WebSocket.OPEN) {
+            client.send(to_send)
+        }
     })
-    for (i = 0; i < student_queue.length; i++) {
-        student_queue[i].client.send(`There are ${i} people ahead of you in the queue.`)
-    }
 }
 
-const matchInterval = setInterval(match, 1000)
+// const updateInterval = setInterval(send_state, 1000)
 
 wss.on('close', function close() {
     clearInterval(pingInterval)
